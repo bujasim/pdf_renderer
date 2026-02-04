@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtQuick.Window
 
 ApplicationWindow {
     id: window
@@ -10,7 +11,7 @@ ApplicationWindow {
     visible: true
     title: "MuPDF Tiled Viewer"
 
-    property real zoom: 1.0
+    property real zoomStep: 1.15
 
     FileDialog {
         id: fileDialog
@@ -25,7 +26,8 @@ ApplicationWindow {
                 path = path.replace(/^(file:\/{2})/, "");
             }
             pdfController.pdfPath = path;
-            requestUpdate();
+            pdfController.fitPage();
+            pdfController.requestRender();
         }
     }
 
@@ -36,26 +38,10 @@ ApplicationWindow {
         }
         Menu {
             title: "View"
-            MenuItem { text: "Zoom In"; onTriggered: { zoom *= 1.25; requestUpdate() } }
-            MenuItem { text: "Zoom Out"; onTriggered: { zoom /= 1.25; requestUpdate() } }
-            MenuItem { text: "Reset Zoom"; onTriggered: { zoom = 1.0; requestUpdate() } }
+            MenuItem { text: "Zoom In"; onTriggered: pdfController.zoomAt(1.25, viewport.width / 2, viewport.height / 2) }
+            MenuItem { text: "Zoom Out"; onTriggered: pdfController.zoomAt(1.0 / 1.25, viewport.width / 2, viewport.height / 2) }
+            MenuItem { text: "Fit Page"; onTriggered: pdfController.fitPage() }
         }
-    }
-
-    function requestUpdate() {
-        pdfController.updateViewport(flickable.contentX, flickable.contentY, flickable.width, flickable.height, zoom);
-    }
-
-    function applyZoomAt(screenX, screenY, newZoom) {
-        var oldZoom = zoom;
-        if (Math.abs(newZoom - oldZoom) < 0.0001) return;
-        var px = screenX + flickable.contentX;
-        var py = screenY + flickable.contentY;
-        zoom = newZoom;
-        var scale = newZoom / oldZoom;
-        flickable.contentX = px * scale - screenX;
-        flickable.contentY = py * scale - screenY;
-        requestUpdate();
     }
 
     Connections {
@@ -65,114 +51,86 @@ ApplicationWindow {
         }
     }
 
-    Flickable {
-        id: flickable
+    Item {
+        id: viewport
         anchors.fill: parent
-        contentWidth: pdfController.pageWidth * zoom
-        contentHeight: pdfController.pageHeight * zoom
-        clip: true
-        interactive: true
 
-        // Mouse wheel zoom (Ctrl+wheel) and trackpad pinch
+        function currentDpr() {
+            if (window.screen && window.screen.devicePixelRatio) {
+                return window.screen.devicePixelRatio;
+            }
+            return 1.0;
+        }
+
+        onWidthChanged: pdfController.setViewportSize(width, height, currentDpr())
+        onHeightChanged: pdfController.setViewportSize(width, height, currentDpr())
+
+        Component.onCompleted: pdfController.setViewportSize(width, height, currentDpr())
+
+        Image {
+            id: view
+            anchors.fill: parent
+            source: "image://pdf_viewport/frame?gen=" + pdfController.frameId
+            cache: false
+            asynchronous: true
+            fillMode: Image.Stretch
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            property real lastX: 0
+            property real lastY: 0
+
+            onPressed: (mouse) => {
+                lastX = mouse.x;
+                lastY = mouse.y;
+            }
+
+            onPositionChanged: (mouse) => {
+                if (!pressed) return;
+                var dx = mouse.x - lastX;
+                var dy = mouse.y - lastY;
+                pdfController.panBy(dx, dy);
+                lastX = mouse.x;
+                lastY = mouse.y;
+            }
+        }
+
         WheelHandler {
-            id: wheelZoom
-            target: flickable
+            target: viewport
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-            property real zoomMin: 0.1
-            property real zoomMax: 8.0
-            property real zoomStep: 1.15
-
             onWheel: (event) => {
-                // Ctrl+wheel for zoom; otherwise let Flickable handle scrolling
-                if (!event.modifiers || !(event.modifiers & Qt.ControlModifier)) {
-                    event.accepted = false;
-                    return;
-                }
                 var factor = event.angleDelta.y > 0 ? zoomStep : (1.0 / zoomStep);
-                var newZoom = Math.max(zoomMin, Math.min(zoomMax, zoom * factor));
-                var sx = (event && event.position) ? event.position.x : (flickable.width / 2);
-                var sy = (event && event.position) ? event.position.y : (flickable.height / 2);
-                applyZoomAt(sx, sy, newZoom);
+                var sx = (event && event.position) ? event.position.x : (viewport.width / 2);
+                var sy = (event && event.position) ? event.position.y : (viewport.height / 2);
+                pdfController.zoomAt(factor, sx, sy);
                 event.accepted = true;
             }
         }
 
         PinchHandler {
-            target: flickable
-            minimumScale: 0.1
-            maximumScale: 8.0
+            target: viewport
+            property real lastScale: 1.0
+
             onActiveScaleChanged: {
                 if (!active || !centroid || !centroid.position) return;
-                var newZoom = Math.max(minimumScale, Math.min(maximumScale, zoom * activeScale));
-                applyZoomAt(centroid.position.x, centroid.position.y, newZoom);
+                var factor = activeScale / lastScale;
+                pdfController.zoomAt(factor, centroid.position.x, centroid.position.y);
+                lastScale = activeScale;
+            }
+
+            onActiveChanged: {
+                if (!active) lastScale = 1.0;
             }
         }
-
-        onContentXChanged: updateTimer.restart()
-        onContentYChanged: updateTimer.restart()
-
-        // The Tile Grid
-        Item {
-            width: flickable.contentWidth
-            height: flickable.contentHeight
-
-            Repeater {
-                model: Math.ceil(flickable.contentWidth / (pdfController.tileWidth)) * 
-                       Math.ceil(flickable.contentHeight / (pdfController.tileHeight))
-                
-                delegate: Image {
-                    property int cols: Math.ceil(flickable.contentWidth / (pdfController.tileWidth))
-                    property int row: Math.floor(index / cols)
-                    property int col: index % cols
-                    
-                    x: col * pdfController.tileWidth
-                    y: row * pdfController.tileHeight
-                    width: Math.max(0, Math.min(pdfController.tileWidth, flickable.contentWidth - x))
-                    height: Math.max(0, Math.min(pdfController.tileHeight, flickable.contentHeight - y))
-                    visible: width > 0 && height > 0
-                    
-                    fillMode: Image.Stretch
-                    asynchronous: true
-                    cache: true
-                    property string lastKey: ""
-                    
-                    source: {
-                        if (pdfController.pdfPath === "") return "";
-                        var bucketZoom = pdfController.getBucketZoom(zoom);
-                        var pathId = Qt.md5(pdfController.pdfPath).substring(0, 8);
-                        var key = pathId + "_" + pdfController.pageNumber + "_" + bucketZoom.toFixed(4) + "_" + row + "_" + col;
-                        if (lastKey === "") return "";
-                        return "image://pdf_tiles/" + lastKey;
-                    }
-
-                    Connections {
-                        target: pdfController
-                        function onPageChanged() {
-                            lastKey = "";
-                        }
-                        function onTileReady(key, r, c, z) {
-                            var bucketZoom = pdfController.getBucketZoom(zoom);
-                            if (r === row && c === col && Math.abs(z - bucketZoom) < 0.001) {
-                                lastKey = key;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Timer {
-        id: updateTimer
-        interval: 100
-        onTriggered: requestUpdate()
     }
 
     footer: ToolBar {
         RowLayout {
             anchors.fill: parent
             Label {
-                text: "Path: " + pdfController.pdfPath + " | Zoom: " + (zoom * 100).toFixed(1) + "%"
+                text: "Path: " + pdfController.pdfPath + " | Zoom: " + pdfController.zoomPercent.toFixed(1) + "%"
                 Layout.fillWidth: true
                 leftPadding: 10
             }
