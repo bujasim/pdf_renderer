@@ -1,15 +1,27 @@
 <script>
+  import { onMount } from "svelte";
   import Toolbar from "./lib/Toolbar.svelte";
-  import Viewer from "./lib/Viewer.svelte";
+  import PdfViewer from "./lib/PdfViewer.svelte";
 
-  let viewerRef;
+  let src = "";
+  let pageNumber = 1;
 
   function handleOpen(event) {
-    viewerRef?.openUrl(event.detail.url);
+    src = event.detail.url;
   }
+
+  function readQueryFile() {
+    const params = new URLSearchParams(window.location.search);
+    const file = params.get("file");
+    if (file) src = file;
+  }
+
+  onMount(readQueryFile);
 </script>
 
 <div class="app">
   <Toolbar on:open={handleOpen} />
-  <Viewer bind:this={viewerRef} />
+  <div class="viewer-shell">
+    <PdfViewer {src} {pageNumber} />
+  </div>
 </div>

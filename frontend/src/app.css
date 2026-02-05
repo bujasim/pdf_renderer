@@ -49,39 +49,6 @@ html, body {
   text-align: center;
 }
 
-.viewport {
-  position: relative;
+.viewer-shell {
   height: calc(100% - 52px);
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(circle at top, rgba(65, 211, 189, 0.12), transparent 55%),
-              radial-gradient(circle at bottom, rgba(120, 133, 255, 0.08), transparent 60%);
-}
-
-canvas {
-  display: block;
-  transform-origin: center center;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-  background: white;
-}
-
-.empty {
-  position: absolute;
-  text-align: center;
-  color: var(--muted);
-  inset: 0;
-  display: grid;
-  place-content: center;
-  pointer-events: none;
-}
-
-.empty-title {
-  font-size: 20px;
-  margin-bottom: 6px;
-}
-
-.empty-subtitle {
-  font-size: 14px;
 }

@@ -1,16 +1,19 @@
 # PDF Viewer (PyWebView + Svelte + PDF.js)
 
-This repo is in an **iterative build** process. The current snapshot is the last confirmed-good behavior:
+This repo is in an **iterative build** process. The current behavior is:
 
 - Centered layout
+- Multipage scroll layout
 - Fit-to-width on load
 - Ctrl+Wheel smooth zoom preview
 - Zoom settle re-render (reduces blur)
-- No cursor anchoring, no pan, no bounds logic yet
+- Lazy render + cache visible pages
+- Cursor-anchored zoom (falls back to center if cursor outside viewport)
 
 ## Structure
 - `backend/` Python launcher (PyWebView)
 - `frontend/` Svelte + Vite source
+- `frontend/src/lib/PdfViewer.svelte` self-contained viewer component
 - `web/` Vite build output (static assets loaded by PyWebView)
 
 ## Run (baseline)
@@ -20,11 +23,15 @@ This repo is in an **iterative build** process. The current snapshot is the last
 4. `cd ..`
 5. `python backend/app.py`
 
-## Current Baseline (Step 4)
-- The viewer renders page 1 at fit-to-width scale.
-- Ctrl+Wheel applies a CSS scale preview.
-- After ~140ms idle, the page re-renders at the new scale.
+## Current Baseline
+- The viewer builds a multipage scroll stack and jumps to `pageNumber`.
+- `Ctrl+Wheel` applies a CSS scale preview (layout scales via CSS variables).
+- After ~140ms idle, visible pages re-render at the new scale.
+- Cursor-anchored zoom accounts for centered pages; if the cursor is outside the viewport, zoom falls back to center.
 
-## Next Steps
-- Add cursor-anchored zoom without breaking the baseline.
-- Add bounded pan after anchor is stable.
+## Component API (minimal)
+- Props: `src` (URL), `pageNumber` (1-based)
+
+## Optional Extensions (not implemented)
+- Text layer for selection/CTRL+C.
+- Overlay layer for bounding boxes/annotations.
