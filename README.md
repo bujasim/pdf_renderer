@@ -1,20 +1,9 @@
 # PDF Viewer (PyWebView + Svelte + PDF.js)
 
-This repo is in an **iterative build** process. The current behavior is:
-
-- Centered layout
-- Multipage scroll layout
-- Fit-to-width on load
-- Ctrl+Wheel smooth zoom preview
-- Zoom settle re-render (reduces blur)
-- Lazy render + cache visible pages
-- Cursor-anchored zoom (falls back to center if cursor outside viewport)
-
-## Structure
-- `backend/` Python launcher (PyWebView)
-- `frontend/` Svelte + Vite source
-- `frontend/src/lib/PdfViewer.svelte` self-contained viewer component
-- `web/` Vite build output (static assets loaded by PyWebView)
+## Intent
+- Self-contained Svelte component for embedding into a larger app.
+- Performance-first: lazy render, caching, minimal DOM churn.
+- Predictable UX: centered pages, fit-to-width on load, smooth zoom.
 
 ## Run (baseline)
 1. `cd frontend`
@@ -23,15 +12,76 @@ This repo is in an **iterative build** process. The current behavior is:
 4. `cd ..`
 5. `python backend/app.py`
 
-## Current Baseline
-- The viewer builds a multipage scroll stack and jumps to `pageNumber`.
-- `Ctrl+Wheel` applies a CSS scale preview (layout scales via CSS variables).
-- After ~140ms idle, visible pages re-render at the new scale.
-- Cursor-anchored zoom accounts for centered pages; if the cursor is outside the viewport, zoom falls back to center.
+## Component Usage
+```svelte
+<script>
+  import PdfViewer from "./lib/PdfViewer.svelte";
 
-## Component API (minimal)
-- Props: `src` (URL), `pageNumber` (1-based), `pageMode` (`"all"` | `"subset"`), `pages` (array of page numbers), `renderText` (boolean), `overlays` (array)
+  const overlays = [
+    { id: "a1", page: 1, x: 72, y: 72, width: 200, height: 60, color: "#ff7a00" },
+  ];
+</script>
 
-## Optional Extensions (not implemented)
-- Text layer for selection/CTRL+C.
-- Overlay layer for bounding boxes/annotations.
+<PdfViewer
+  src="/docs/sample.pdf"
+  pageNumber={1}
+  pageMode="all"
+  renderText={true}
+  overlays={overlays}
+  scrollToAnnotationId={"a1"}
+/>
+```
+
+## Props
+- `src` (string, required)
+  - PDF URL or file path.
+- `pageNumber` (number, 1-based)
+  - Scrolls to this page when set.
+- `pageMode` (`"all" | "subset"`)
+  - `"all"`: render all pages lazily.
+  - `"subset"`: render only the pages in `pages`.
+- `pages` (number[])
+  - Used only when `pageMode="subset"`.
+  - Invalid or missing page numbers are ignored.
+- `renderText` (boolean)
+  - Enables pdf.js text layer for selection and CTRL+C.
+- `overlays` (array)
+  - Bounding boxes drawn over pages.
+- `scrollToAnnotationId` (string | number | null)
+  - Scrolls to the overlay with matching `id` and centers it.
+  - If the target page is not in the subset, it logs a warning and does nothing.
+
+## Behavior Notes
+- Fit-to-width is computed on load using the first page and container width.
+- `Ctrl+Wheel` zooms smoothly via CSS preview, then re-renders at the new scale.
+- Zoom is cursor-anchored when the cursor is within the viewport.
+- Pages are centered in the viewport.
+- Lazy rendering uses `IntersectionObserver` with a large root margin.
+
+## Overlays
+- Coordinate system: PDF units with origin at bottom-left of the page.
+- Required fields: `page`, `x`, `y`, `width`, `height`.
+- Optional fields: `id`, `color`, `borderWidth`, `borderStyle`, `fill`.
+
+Overlay shape example:
+```js
+{
+  id: "case-41",
+  page: 12,
+  x: 144,
+  y: 200,
+  width: 120,
+  height: 24,
+  color: "rgba(255, 0, 0, 0.8)",
+  borderWidth: 2,
+  borderStyle: "solid",
+  fill: "transparent"
+}
+```
+
+## Internal Design (overview)
+- `PdfViewer.svelte` orchestrates loading, paging, zoom, and rendering.
+- `FrameLayout.svelte` provides the centered layout shell.
+- `ScrollViewport.svelte` handles scroll and wheel events.
+- `PageStack.svelte` scales gaps/padding via `viewScale`.
+- `pdfjs.js` wraps `pdfjs-dist` and exposes render helpers.

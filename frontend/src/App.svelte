@@ -11,10 +11,11 @@
   let renderText = false;
   let showOverlays = false;
   let overlays = [];
+  let scrollToAnnotationId = "";
 
   const sampleOverlays = [
-    { page: 1, x: 72, y: 72, width: 200, height: 60, color: "#ff7a00" },
-    { page: 1, x: 72, y: 160, width: 300, height: 40, color: "#41d3bd" },
+    { id: "a1", page: 1, x: 72, y: 72, width: 200, height: 60, color: "#ff7a00" },
+    { id: "a2", page: 1, x: 72, y: 160, width: 300, height: 40, color: "#41d3bd" },
   ];
 
   function handleOpen(event) {
@@ -94,6 +95,10 @@
       />
       <span>Overlays</span>
     </label>
+    <label class="debug-field debug-pages">
+      <span>Scroll to ID</span>
+      <input type="text" bind:value={scrollToAnnotationId} placeholder="a1" />
+    </label>
     {#if pageMode === "subset"}
       <label class="debug-field debug-pages">
         <span>Pages</span>
@@ -102,6 +107,14 @@
     {/if}
   </div>
   <div class="viewer-shell">
-    <PdfViewer {src} {pageNumber} {pageMode} {pages} {renderText} {overlays} />
+    <PdfViewer
+      {src}
+      {pageNumber}
+      {pageMode}
+      {pages}
+      {renderText}
+      {overlays}
+      {scrollToAnnotationId}
+    />
   </div>
 </div>

@@ -11,6 +11,7 @@
   export let pages = [];
   export let renderText = false;
   export let overlays = [];
+  export let scrollToAnnotationId = null;
 
   let scrollEl;
 
@@ -27,6 +28,7 @@
   let lastPageMode = "all";
   let lastPagesKey = "";
   let lastOverlaysRef = overlays;
+  let lastScrollToAnnotationId = scrollToAnnotationId;
   let loadToken = 0;
   let observer = null;
   const elementToState = new WeakMap();
@@ -34,6 +36,7 @@
   let basePageWidth = 0;
   let basePageHeight = 0;
   let overlaysByPage = new Map();
+  let overlayById = new Map();
   let overlaysVersion = 0;
 
   const PAGE_GAP = 18;
@@ -153,6 +156,7 @@
 
   function rebuildOverlaysIndex() {
     overlaysByPage = new Map();
+    overlayById = new Map();
     if (!Array.isArray(overlays)) return;
     for (const overlay of overlays) {
       if (!overlay) continue;
@@ -160,6 +164,9 @@
       if (!Number.isInteger(page)) continue;
       if (!overlaysByPage.has(page)) overlaysByPage.set(page, []);
       overlaysByPage.get(page).push(overlay);
+      if (overlay.id !== undefined && overlay.id !== null) {
+        overlayById.set(String(overlay.id), overlay);
+      }
     }
   }
 
@@ -201,6 +208,9 @@
 
       const box = document.createElement("div");
       box.className = "overlay-box";
+      if (item.id !== undefined && item.id !== null) {
+        box.dataset.annotationId = String(item.id);
+      }
       box.style.left = `${left}px`;
       box.style.top = `${top}px`;
       box.style.width = `${boxWidth}px`;
@@ -335,6 +345,36 @@
     state.el.scrollIntoView({ block: "start" });
   }
 
+  async function scrollToAnnotation(targetId) {
+    if (!targetId) return;
+    const key = String(targetId);
+    const overlay = overlayById.get(key);
+    if (!overlay) {
+      console.warn(`PdfViewer: annotation id ${key} not found.`);
+      return;
+    }
+    const page = Number(overlay.page);
+    if (!Number.isInteger(page)) return;
+    const state = pageStateByNumber.get(page);
+    if (!state || !state.el) {
+      if (pageMode === "subset") {
+        console.warn(
+          `PdfViewer: annotation id ${key} page ${page} not in subset pages.`
+        );
+      }
+      return;
+    }
+    await renderPageForState(state);
+    await tick();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const target = state.el.querySelector(`[data-annotation-id="${key}"]`);
+    if (!target) {
+      console.warn(`PdfViewer: annotation id ${key} not rendered.`);
+      return;
+    }
+    target.scrollIntoView({ block: "center", inline: "center" });
+  }
+
   async function rebuildPageStates() {
     if (!pdfDoc) return;
     const pageList = getPageList(pdfDoc);
@@ -432,6 +472,11 @@
     rebuildOverlaysIndex();
     overlaysVersion += 1;
     tick().then(renderVisiblePages);
+  }
+
+  $: if (scrollToAnnotationId !== lastScrollToAnnotationId) {
+    lastScrollToAnnotationId = scrollToAnnotationId;
+    scrollToAnnotation(scrollToAnnotationId);
   }
 </script>
 
