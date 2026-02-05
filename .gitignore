@@ -12,3 +12,6 @@ wheels/
 # Local env/editor files
 .env
 .vscode/
+
+# Local docs mirror
+doc.qt.io/
