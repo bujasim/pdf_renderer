@@ -1,0 +1,87 @@
+:root {
+  color-scheme: light;
+  --bg: #0f1220;
+  --panel: #181c2e;
+  --text: #e8ecf1;
+  --muted: #9aa3b2;
+  --accent: #41d3bd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: "Sora", "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app, .app {
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoom-label {
+  min-width: 52px;
+  text-align: center;
+}
+
+.viewport {
+  position: relative;
+  height: calc(100% - 52px);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, rgba(65, 211, 189, 0.12), transparent 55%),
+              radial-gradient(circle at bottom, rgba(120, 133, 255, 0.08), transparent 60%);
+}
+
+canvas {
+  display: block;
+  transform-origin: center center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  background: white;
+}
+
+.empty {
+  position: absolute;
+  text-align: center;
+  color: var(--muted);
+  inset: 0;
+  display: grid;
+  place-content: center;
+  pointer-events: none;
+}
+
+.empty-title {
+  font-size: 20px;
+  margin-bottom: 6px;
+}
+
+.empty-subtitle {
+  font-size: 14px;
+}

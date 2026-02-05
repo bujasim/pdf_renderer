@@ -9,9 +9,15 @@ wheels/
 # Virtual environments
 .venv
 
+# Node
+node_modules/
+
 # Local env/editor files
 .env
 .vscode/
 
 # Local docs mirror
 doc.qt.io/
+
+# Frontend build output
+web/
