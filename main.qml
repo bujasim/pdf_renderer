@@ -3,32 +3,67 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQuick.Window
+import QtQuick.Pdf
 
-ApplicationWindow {
-    id: window
-    width: 1024
-    height: 768
-    visible: true
-    title: "MuPDF Tiled Viewer"
+    ApplicationWindow {
+        id: window
+        width: 1024
+        height: 768
+        visible: true
+        title: document.title !== "" ? document.title : "PDF Viewer"
 
-    property real zoomStep: 1.15
+        property real zoomStep: 1.25
 
     FileDialog {
         id: fileDialog
         title: "Please choose a PDF file"
         nameFilters: ["PDF files (*.pdf)"]
         onAccepted: {
-            var path = selectedFile.toString();
-            if (Qt.platform.os === "windows") {
-                path = path.replace(/^(file:\/{3})/, "");
-                path = path.replace(/\//g, "\\");
-            } else {
-                path = path.replace(/^(file:\/{2})/, "");
-            }
-            pdfController.pdfPath = path;
-            pdfController.fitPage();
-            pdfController.requestRender();
+            document.source = selectedFile
+            view.scaleToPage(view.width, view.height)
         }
+    }
+
+    Dialog {
+        id: passwordDialog
+        title: "Password"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        anchors.centerIn: parent
+        width: 300
+
+        contentItem: TextField {
+            id: passwordField
+            placeholderText: "Please provide the password"
+            echoMode: TextInput.Password
+            width: parent.width
+            onAccepted: passwordDialog.accept()
+        }
+
+        onOpened: passwordField.forceActiveFocus()
+        onAccepted: document.password = passwordField.text
+    }
+
+    Dialog {
+        id: errorDialog
+        title: "Error loading " + document.source
+        standardButtons: Dialog.Close
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        anchors.centerIn: parent
+        width: 320
+        visible: document.status === PdfDocument.Error
+
+        contentItem: Label {
+            text: document.error
+            wrapMode: Text.WordWrap
+        }
+    }
+
+    PdfDocument {
+        id: document
+        onPasswordRequired: passwordDialog.open()
     }
 
     menuBar: MenuBar {
@@ -38,90 +73,35 @@ ApplicationWindow {
         }
         Menu {
             title: "View"
-            MenuItem { text: "Zoom In"; onTriggered: pdfController.zoomAt(1.25, viewport.width / 2, viewport.height / 2) }
-            MenuItem { text: "Zoom Out"; onTriggered: pdfController.zoomAt(1.0 / 1.25, viewport.width / 2, viewport.height / 2) }
-            MenuItem { text: "Fit Page"; onTriggered: pdfController.fitPage() }
+            MenuItem { text: "Zoom In"; onTriggered: view.renderScale *= zoomStep }
+            MenuItem { text: "Zoom Out"; onTriggered: view.renderScale /= zoomStep }
+            MenuItem { text: "Fit Page"; onTriggered: view.scaleToPage(view.width, view.height) }
+            MenuItem { text: "Fit Width"; onTriggered: view.scaleToWidth(view.width, view.height) }
+            MenuSeparator { }
+            MenuItem { text: "Previous Page"; onTriggered: view.back() }
+            MenuItem { text: "Next Page"; onTriggered: view.forward() }
         }
     }
 
-    Connections {
-        target: pdfController
-        function onPageChanged() {
-            // No-op here; delegates reset on page change
-        }
-    }
-
-    Item {
-        id: viewport
+    PdfScrollablePageView {
+        id: view
         anchors.fill: parent
-
-        function currentDpr() {
-            if (window.screen && window.screen.devicePixelRatio) {
-                return window.screen.devicePixelRatio;
-            }
-            return 1.0;
-        }
-
-        onWidthChanged: pdfController.setViewportSize(width, height, currentDpr())
-        onHeightChanged: pdfController.setViewportSize(width, height, currentDpr())
-
-        Component.onCompleted: pdfController.setViewportSize(width, height, currentDpr())
-
-        Image {
-            id: view
-            anchors.fill: parent
-            source: "image://pdf_viewport/frame?gen=" + pdfController.frameId
-            cache: false
-            asynchronous: true
-            fillMode: Image.Stretch
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            property real lastX: 0
-            property real lastY: 0
-
-            onPressed: (mouse) => {
-                lastX = mouse.x;
-                lastY = mouse.y;
-            }
-
-            onPositionChanged: (mouse) => {
-                if (!pressed) return;
-                var dx = mouse.x - lastX;
-                var dy = mouse.y - lastY;
-                pdfController.panBy(dx, dy);
-                lastX = mouse.x;
-                lastY = mouse.y;
-            }
-        }
+        document: document
+        focus: true
 
         WheelHandler {
-            target: viewport
+            target: null
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            acceptedModifiers: Qt.ControlModifier
             onWheel: (event) => {
-                var factor = event.angleDelta.y > 0 ? zoomStep : (1.0 / zoomStep);
-                var sx = (event && event.position) ? event.position.x : (viewport.width / 2);
-                var sy = (event && event.position) ? event.position.y : (viewport.height / 2);
-                pdfController.zoomAt(factor, sx, sy);
-                event.accepted = true;
-            }
-        }
-
-        PinchHandler {
-            target: viewport
-            property real lastScale: 1.0
-
-            onActiveScaleChanged: {
-                if (!active || !centroid || !centroid.position) return;
-                var factor = activeScale / lastScale;
-                pdfController.zoomAt(factor, centroid.position.x, centroid.position.y);
-                lastScale = activeScale;
-            }
-
-            onActiveChanged: {
-                if (!active) lastScale = 1.0;
+                let delta = event.angleDelta.y
+                if (!delta)
+                    delta = event.pixelDelta.y
+                if (!delta)
+                    return
+                const factor = delta > 0 ? zoomStep : (1 / zoomStep)
+                view.renderScale = Math.max(0.1, Math.min(10, view.renderScale * factor))
+                event.accepted = true
             }
         }
     }
@@ -130,7 +110,9 @@ ApplicationWindow {
         RowLayout {
             anchors.fill: parent
             Label {
-                text: "Path: " + pdfController.pdfPath + " | Zoom: " + pdfController.zoomPercent.toFixed(1) + "%"
+                text: document.status === PdfDocument.Ready
+                      ? ("Page " + (view.currentPage + 1) + " / " + document.pageCount + " | Zoom " + view.renderScale.toFixed(2))
+                      : ""
                 Layout.fillWidth: true
                 leftPadding: 10
             }
