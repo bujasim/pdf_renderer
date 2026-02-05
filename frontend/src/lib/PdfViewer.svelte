@@ -7,6 +7,8 @@
 
   export let src = "";
   export let pageNumber = 1;
+  export let pageMode = "all"; // "all" | "subset"
+  export let pages = [];
 
   let scrollEl;
 
@@ -20,9 +22,14 @@
   let emptyStateVisible = true;
   let lastSrc = "";
   let lastPageNumber = null;
+  let lastPageMode = "all";
+  let lastPagesKey = "";
   let loadToken = 0;
   let observer = null;
   const elementToState = new WeakMap();
+  let pageStateByNumber = new Map();
+  let basePageWidth = 0;
+  let basePageHeight = 0;
 
   const PAGE_GAP = 18;
   const PAGE_PAD = 24;
@@ -54,8 +61,8 @@
   }
 
   function createPageStates(count, defaultWidth, defaultHeight) {
-    return Array.from({ length: count }, (_, index) => ({
-      number: index + 1,
+    return count.map((pageNum) => ({
+      number: pageNum,
       el: null,
       canvasEl: null,
       page: null,
@@ -104,6 +111,36 @@
       elementToState.set(state.el, state);
       observer.observe(state.el);
     }
+  }
+
+  function rebuildPageIndex() {
+    pageStateByNumber = new Map();
+    for (const state of pageStates) {
+      pageStateByNumber.set(state.number, state);
+    }
+  }
+
+  function normalizePages(input, maxPages) {
+    if (!Array.isArray(input)) return [];
+    const unique = new Set();
+    for (const value of input) {
+      const num = Number(value);
+      if (!Number.isInteger(num)) continue;
+      if (num < 1 || num > maxPages) continue;
+      unique.add(num);
+    }
+    return Array.from(unique).sort((a, b) => a - b);
+  }
+
+  function getPageList(doc) {
+    if (pageMode === "subset") {
+      return normalizePages(pages, doc.numPages);
+    }
+    return Array.from({ length: doc.numPages }, (_, index) => index + 1);
+  }
+
+  function warnMissingPage(targetPage) {
+    console.warn(`PdfViewer: pageNumber ${targetPage} not found in subset pages.`);
   }
 
   function rescaleAllPageBases(ratio) {
@@ -185,14 +222,37 @@
     viewScale = 1.0;
     pageGap = PAGE_GAP;
     pagePad = PAGE_PAD;
+    pageStateByNumber = new Map();
+    basePageWidth = 0;
+    basePageHeight = 0;
     clearSettle();
     emptyStateVisible = true;
   }
 
   function scrollToPage(targetPage) {
-    const state = pageStates[targetPage - 1];
-    if (!state || !state.el) return;
+    const state = pageStateByNumber.get(targetPage);
+    if (!state || !state.el) {
+      if (pageMode === "subset") warnMissingPage(targetPage);
+      return;
+    }
     state.el.scrollIntoView({ block: "start" });
+  }
+
+  async function rebuildPageStates() {
+    if (!pdfDoc) return;
+    const pageList = getPageList(pdfDoc);
+    pageStates = createPageStates(pageList, basePageWidth, basePageHeight);
+    await tick();
+    rebuildPageIndex();
+    setupObserver();
+    emptyStateVisible = pageStates.length === 0;
+    if (!pageStates.length) {
+      console.warn("PdfViewer: no pages to render in subset mode.");
+      return;
+    }
+    scrollToPage(pageNumber);
+    const state = pageStateByNumber.get(pageNumber);
+    if (state) renderPageForState(state);
   }
 
   async function loadFromSource(nextSrc) {
@@ -213,11 +273,22 @@
     pagePad = PAGE_PAD * renderScale;
     viewScale = 1.0;
     const firstViewport = firstPage.getViewport({ scale: renderScale });
-    pageStates = createPageStates(doc.numPages, firstViewport.width, firstViewport.height);
+    basePageWidth = firstViewport.width;
+    basePageHeight = firstViewport.height;
+    pageStates = createPageStates(getPageList(doc), basePageWidth, basePageHeight);
     await tick();
+    rebuildPageIndex();
     setupObserver();
-    emptyStateVisible = false;
-    await renderPageForState(pageStates[Math.max(0, pageNumber - 1)]);
+    emptyStateVisible = pageStates.length === 0;
+    if (!pageStates.length) {
+      console.warn("PdfViewer: no pages to render in subset mode.");
+      return;
+    }
+    const initialState = pageStateByNumber.get(pageNumber) || pageStates[0];
+    if (!pageStateByNumber.has(pageNumber) && pageMode === "subset") {
+      warnMissingPage(pageNumber);
+    }
+    await renderPageForState(initialState);
     scrollToPage(pageNumber);
   }
 
@@ -229,10 +300,18 @@
   $: if (src && pageNumber !== lastPageNumber) {
     lastPageNumber = pageNumber;
     scrollToPage(pageNumber);
-    const state = pageStates[pageNumber - 1];
+    const state = pageStateByNumber.get(pageNumber);
     if (state) renderPageForState(state);
   }
 
+  $: {
+    const pagesKey = Array.isArray(pages) ? pages.join(",") : "";
+    if (pageMode !== lastPageMode || pagesKey !== lastPagesKey) {
+      lastPageMode = pageMode;
+      lastPagesKey = pagesKey;
+      rebuildPageStates();
+    }
+  }
 </script>
 
 <FrameLayout
