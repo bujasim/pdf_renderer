@@ -21,3 +21,6 @@ doc.qt.io/
 
 # Frontend build output
 web/
+
+# Local debug logs
+logs/

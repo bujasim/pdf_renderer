@@ -12,6 +12,8 @@
   export let renderText = false;
   export let overlays = [];
   export let scrollToAnnotationId = null;
+  export let scrollToAnnotationZoom = false;
+  export let debugScroll = false;
 
   let scrollEl;
 
@@ -28,7 +30,7 @@
   let lastPageMode = "all";
   let lastPagesKey = "";
   let lastOverlaysRef = overlays;
-  let lastScrollToAnnotationId = scrollToAnnotationId;
+  let lastScrollRequestKey = "";
   let loadToken = 0;
   let observer = null;
   const elementToState = new WeakMap();
@@ -42,6 +44,8 @@
   const PAGE_GAP = 18;
   const PAGE_PAD = 24;
   const OBSERVER_MARGIN = "800px 0px";
+  const ANNOTATION_ZOOM_PADDING = 0.2;
+  const EPSILON = 1e-3;
 
   function clampTotalScale(next) {
     return Math.max(0.1, Math.min(10, next));
@@ -53,6 +57,25 @@
     const containerWidth = scrollEl.clientWidth;
     if (!containerWidth) return 1.0;
     return containerWidth / baseViewport.width;
+  }
+
+  function computePageLeft(pageWidth) {
+    if (!scrollEl) return 0;
+    return Math.max(0, (scrollEl.clientWidth - pageWidth) / 2);
+  }
+
+  async function logDebug(event, data) {
+    if (!debugScroll) return;
+    const payload = { event, ...data };
+    try {
+      if (window?.pywebview?.api?.log_debug) {
+        await window.pywebview.api.log_debug(payload);
+      } else {
+        console.log("[PdfViewer]", payload);
+      }
+    } catch (err) {
+      console.warn("[PdfViewer] debug log failed", err);
+    }
   }
 
   function clearSettle() {
@@ -170,6 +193,26 @@
     }
   }
 
+  function getOverlayViewportRect(item, page, scale) {
+    if (!item || !page) return null;
+    const x = Number(item.x) || 0;
+    const y = Number(item.y) || 0;
+    const width = Number(item.width) || 0;
+    const height = Number(item.height) || 0;
+    const viewport = page.getViewport({ scale });
+    const rect = viewport.convertToViewportRectangle([
+      x,
+      y,
+      x + width,
+      y + height,
+    ]);
+    const left = Math.min(rect[0], rect[2]);
+    const top = Math.min(rect[1], rect[3]);
+    const boxWidth = Math.abs(rect[0] - rect[2]);
+    const boxHeight = Math.abs(rect[1] - rect[3]);
+    return { left, top, width: boxWidth, height: boxHeight };
+  }
+
   function renderOverlaysForState(state) {
     if (!state.overlayEl || !state.page) return;
     const list = overlaysByPage.get(state.number) || [];
@@ -185,22 +228,9 @@
       state.overlayVersion = overlaysVersion;
       return;
     }
-    const viewport = state.page.getViewport({ scale: renderScale });
     for (const item of list) {
-      const x = Number(item.x) || 0;
-      const y = Number(item.y) || 0;
-      const width = Number(item.width) || 0;
-      const height = Number(item.height) || 0;
-      const rect = viewport.convertToViewportRectangle([
-        x,
-        y,
-        x + width,
-        y + height,
-      ]);
-      const left = Math.min(rect[0], rect[2]);
-      const top = Math.min(rect[1], rect[3]);
-      const boxWidth = Math.abs(rect[0] - rect[2]);
-      const boxHeight = Math.abs(rect[1] - rect[3]);
+      const rect = getOverlayViewportRect(item, state.page, renderScale);
+      if (!rect) continue;
       const borderColor = item.color || "rgba(255, 0, 0, 0.8)";
       const borderStyle = item.borderStyle || item.border || "solid";
       const borderWidth = Number(item.borderWidth ?? 2);
@@ -211,10 +241,10 @@
       if (item.id !== undefined && item.id !== null) {
         box.dataset.annotationId = String(item.id);
       }
-      box.style.left = `${left}px`;
-      box.style.top = `${top}px`;
-      box.style.width = `${boxWidth}px`;
-      box.style.height = `${boxHeight}px`;
+      box.style.left = `${rect.left}px`;
+      box.style.top = `${rect.top}px`;
+      box.style.width = `${rect.width}px`;
+      box.style.height = `${rect.height}px`;
       box.style.border = `${borderWidth}px ${borderStyle} ${borderColor}`;
       box.style.background = fill;
       state.overlayEl.appendChild(box);
@@ -244,6 +274,48 @@
 
   function warnMissingPage(targetPage) {
     console.warn(`PdfViewer: pageNumber ${targetPage} not found in subset pages.`);
+  }
+
+  function computeAnnotationFitViewScale(rect) {
+    if (!scrollEl || !rect) return null;
+    const availableWidth = scrollEl.clientWidth * (1 - ANNOTATION_ZOOM_PADDING);
+    const availableHeight = scrollEl.clientHeight * (1 - ANNOTATION_ZOOM_PADDING);
+    if (availableWidth <= 0 || availableHeight <= 0) return null;
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return Math.min(availableWidth / rect.width, availableHeight / rect.height);
+  }
+
+  function centerElementInScroll(target) {
+    if (!scrollEl || !target) return false;
+    const viewportRect = scrollEl.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetCenterX = targetRect.left + targetRect.width / 2;
+    const targetCenterY = targetRect.top + targetRect.height / 2;
+    const viewportCenterX = viewportRect.left + viewportRect.width / 2;
+    const viewportCenterY = viewportRect.top + viewportRect.height / 2;
+    const deltaX = targetCenterX - viewportCenterX;
+    const deltaY = targetCenterY - viewportCenterY;
+    const nextScrollLeft = scrollEl.scrollLeft + deltaX;
+    const nextScrollTop = scrollEl.scrollTop + deltaY;
+    logDebug("scrollToDocPoint", {
+      targetCenterX,
+      targetCenterY,
+      viewportCenterX,
+      viewportCenterY,
+      deltaX,
+      deltaY,
+      prevScrollLeft: scrollEl.scrollLeft,
+      prevScrollTop: scrollEl.scrollTop,
+      nextScrollLeft,
+      nextScrollTop,
+      scrollWidth: scrollEl.scrollWidth,
+      scrollHeight: scrollEl.scrollHeight,
+      clientWidth: scrollEl.clientWidth,
+      clientHeight: scrollEl.clientHeight,
+    });
+    scrollEl.scrollLeft = nextScrollLeft;
+    scrollEl.scrollTop = nextScrollTop;
+    return true;
   }
 
   function rescaleAllPageBases(ratio) {
@@ -299,12 +371,12 @@
     const state = pageEl ? elementToState.get(pageEl) : null;
     if (state && state.el) {
       const pageWidth = state.baseWidth * viewScale;
-      const pageLeft = (scrollEl.clientWidth - pageWidth) / 2;
+      const pageLeft = computePageLeft(pageWidth);
       const pageTop = state.el.offsetTop;
       const docX = (scrollEl.scrollLeft + anchorX - pageLeft) / viewScale;
       const docY = (scrollEl.scrollTop + anchorY - pageTop) / viewScale;
       const nextPageWidth = state.baseWidth * nextViewScale;
-      const nextPageLeft = (scrollEl.clientWidth - nextPageWidth) / 2;
+      const nextPageLeft = computePageLeft(nextPageWidth);
       const nextPageTop = pageTop * ratio;
       nextScrollLeft = docX * nextViewScale + nextPageLeft - anchorX;
       nextScrollTop = docY * nextViewScale + nextPageTop - anchorY;
@@ -347,6 +419,7 @@
 
   async function scrollToAnnotation(targetId) {
     if (!targetId) return;
+    if (!pdfDoc) return;
     const key = String(targetId);
     const overlay = overlayById.get(key);
     if (!overlay) {
@@ -364,15 +437,84 @@
       }
       return;
     }
+    if (!state.page) state.page = await pdfDoc.getPage(state.number);
+    const rect = getOverlayViewportRect(overlay, state.page, renderScale);
+    if (!rect) return;
+
+    let targetViewScale = viewScale;
+    if (scrollToAnnotationZoom) {
+      const fitViewScale = computeAnnotationFitViewScale(rect);
+      if (fitViewScale && fitViewScale > viewScale + EPSILON) {
+        const targetTotal = clampTotalScale(renderScale * fitViewScale);
+        targetViewScale = targetTotal / renderScale;
+      }
+    }
+    logDebug("scrollToAnnotation", {
+      id: key,
+      page,
+      rect,
+      renderScale,
+      viewScale,
+      targetViewScale,
+    });
+
     await renderPageForState(state);
-    await tick();
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const previousViewScale = viewScale;
+    if (Math.abs(targetViewScale - viewScale) > EPSILON) {
+      viewScale = targetViewScale;
+      await tick();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
     const target = state.el.querySelector(`[data-annotation-id="${key}"]`);
     if (!target) {
       console.warn(`PdfViewer: annotation id ${key} not rendered.`);
       return;
     }
-    target.scrollIntoView({ block: "center", inline: "center" });
+    const didScroll = centerElementInScroll(target);
+    if (!didScroll) {
+      target.scrollIntoView({ block: "center", inline: "center" });
+      return;
+    }
+    if (Math.abs(viewScale - previousViewScale) > EPSILON) {
+      scheduleSettle();
+    }
+
+    if (debugScroll) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const viewportRect = scrollEl.getBoundingClientRect();
+      const pageRect = state.el.getBoundingClientRect();
+      const targetRect = target?.getBoundingClientRect?.() ?? null;
+      const targetCenterX = targetRect
+        ? targetRect.left + targetRect.width / 2 - viewportRect.left
+        : null;
+      const targetCenterY = targetRect
+        ? targetRect.top + targetRect.height / 2 - viewportRect.top
+        : null;
+      logDebug("scrollToAnnotationPost", {
+        scrollLeft: scrollEl.scrollLeft,
+        scrollTop: scrollEl.scrollTop,
+        viewport: {
+          width: viewportRect.width,
+          height: viewportRect.height,
+        },
+        pageRect: {
+          left: pageRect.left,
+          top: pageRect.top,
+          width: pageRect.width,
+          height: pageRect.height,
+        },
+        targetRect: targetRect
+          ? {
+              left: targetRect.left,
+              top: targetRect.top,
+              width: targetRect.width,
+              height: targetRect.height,
+            }
+          : null,
+        targetCenterX,
+        targetCenterY,
+      });
+    }
   }
 
   async function rebuildPageStates() {
@@ -474,9 +616,14 @@
     tick().then(renderVisiblePages);
   }
 
-  $: if (scrollToAnnotationId !== lastScrollToAnnotationId) {
-    lastScrollToAnnotationId = scrollToAnnotationId;
-    scrollToAnnotation(scrollToAnnotationId);
+  $: {
+    const requestKey = `${scrollToAnnotationId ?? ""}|${
+      scrollToAnnotationZoom ? "1" : "0"
+    }|${pageStates.length}|${pdfDoc ? "1" : "0"}`;
+    if (requestKey !== lastScrollRequestKey) {
+      lastScrollRequestKey = requestKey;
+      scrollToAnnotation(scrollToAnnotationId);
+    }
   }
 </script>
 
@@ -493,16 +640,18 @@
           bind:this={state.el}
           style={`--page-base-w: ${state.baseWidth}px; --page-base-h: ${state.baseHeight}px;`}
         >
-          <div
-            class="page-content"
-            bind:this={state.contentEl}
-            style={`transform: ${viewScale === 1 ? "none" : `scale(${viewScale})`};`}
-          >
-            <canvas class="pdf-canvas" bind:this={state.canvasEl}></canvas>
-            {#if renderText}
-              <div class="textLayer text-layer" bind:this={state.textEl}></div>
-            {/if}
-            <div class="overlay-layer" bind:this={state.overlayEl}></div>
+          <div class="page-box">
+            <div
+              class="page-content"
+              bind:this={state.contentEl}
+              style={`transform: ${viewScale === 1 ? "none" : `scale(${viewScale})`};`}
+            >
+              <canvas class="pdf-canvas" bind:this={state.canvasEl}></canvas>
+              {#if renderText}
+                <div class="textLayer text-layer" bind:this={state.textEl}></div>
+              {/if}
+              <div class="overlay-layer" bind:this={state.overlayEl}></div>
+            </div>
           </div>
         </div>
       {/each}
@@ -515,9 +664,17 @@
     --page-base-w: 640px;
     --page-base-h: 900px;
     width: calc(var(--page-base-w) * var(--view-scale));
+    min-width: 100%;
     height: calc(var(--page-base-h) * var(--view-scale));
     position: relative;
     flex: 0 0 auto;
+  }
+
+  .page-box {
+    width: calc(var(--page-base-w) * var(--view-scale));
+    height: calc(var(--page-base-h) * var(--view-scale));
+    margin: 0 auto;
+    position: relative;
   }
 
   .page-content {

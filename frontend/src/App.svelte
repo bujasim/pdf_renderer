@@ -12,6 +12,8 @@
   let showOverlays = false;
   let overlays = [];
   let scrollToAnnotationId = "";
+  let zoomToAnnotation = false;
+  let debugScroll = false;
 
   const sampleOverlays = [
     { id: "a1", page: 1, x: 72, y: 72, width: 200, height: 60, color: "#ff7a00" },
@@ -95,6 +97,22 @@
       />
       <span>Overlays</span>
     </label>
+    <label class="debug-field debug-toggle">
+      <input
+        type="checkbox"
+        checked={zoomToAnnotation}
+        on:change={(event) => (zoomToAnnotation = event.target.checked)}
+      />
+      <span>Zoom to ID</span>
+    </label>
+    <label class="debug-field debug-toggle">
+      <input
+        type="checkbox"
+        checked={debugScroll}
+        on:change={(event) => (debugScroll = event.target.checked)}
+      />
+      <span>Debug scroll</span>
+    </label>
     <label class="debug-field debug-pages">
       <span>Scroll to ID</span>
       <input type="text" bind:value={scrollToAnnotationId} placeholder="a1" />
@@ -115,6 +133,8 @@
       {renderText}
       {overlays}
       {scrollToAnnotationId}
+      scrollToAnnotationZoom={zoomToAnnotation}
+      {debugScroll}
     />
   </div>
 </div>

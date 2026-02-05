@@ -50,6 +50,10 @@
 - `scrollToAnnotationId` (string | number | null)
   - Scrolls to the overlay with matching `id` and centers it.
   - If the target page is not in the subset, it logs a warning and does nothing.
+- `scrollToAnnotationZoom` (boolean)
+  - When true, zooms in (if needed) so the target overlay fits comfortably in view.
+- `debugScroll` (boolean)
+  - When true, logs scroll math to the PyWebView log file (see Debugging).
 
 ## Behavior Notes
 - Fit-to-width is computed on load using the first page and container width.
@@ -78,6 +82,10 @@ Overlay shape example:
   fill: "transparent"
 }
 ```
+
+## Debugging
+- `debugScroll` writes JSON lines to `logs/scroll-debug.jsonl` via the PyWebView JS API.
+- Enable it only when troubleshooting scroll/zoom behavior.
 
 ## Internal Design (overview)
 - `PdfViewer.svelte` orchestrates loading, paging, zoom, and rendering.

@@ -1,7 +1,22 @@
+import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import webview
+
+
+class Api:
+    def __init__(self, log_path: str) -> None:
+        self.log_path = log_path
+
+    def log_debug(self, payload: dict) -> None:
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "payload": payload,
+        }
+        with open(self.log_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
 
 
 def main() -> None:
@@ -21,12 +36,17 @@ def main() -> None:
     if initial_pdf:
         url = f"{url}?file={initial_pdf}"
 
+    log_dir = (base_dir / ".." / "logs").resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = (log_dir / "scroll-debug.jsonl").resolve()
+
     webview.create_window(
         "PDF Viewer",
         url=url,
         width=1200,
         height=800,
         min_size=(900, 600),
+        js_api=Api(str(log_path)),
     )
     webview.start()
 

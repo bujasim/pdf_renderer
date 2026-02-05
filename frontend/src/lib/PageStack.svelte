@@ -22,7 +22,7 @@
     padding: calc(var(--page-pad) * var(--view-scale)) 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: stretch;
     gap: calc(var(--page-gap) * var(--view-scale));
   }
 </style>
