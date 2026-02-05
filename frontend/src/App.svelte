@@ -9,6 +9,13 @@
   let pagesInput = "1-3, 5";
   let pages = [];
   let renderText = false;
+  let showOverlays = false;
+  let overlays = [];
+
+  const sampleOverlays = [
+    { page: 1, x: 72, y: 72, width: 200, height: 60, color: "#ff7a00" },
+    { page: 1, x: 72, y: 160, width: 300, height: 40, color: "#41d3bd" },
+  ];
 
   function handleOpen(event) {
     src = event.detail.url;
@@ -43,6 +50,10 @@
     pages = [];
   }
 
+  $: {
+    overlays = showOverlays ? sampleOverlays : [];
+  }
+
   function readQueryFile() {
     const params = new URLSearchParams(window.location.search);
     const file = params.get("file");
@@ -75,6 +86,14 @@
       />
       <span>Text layer</span>
     </label>
+    <label class="debug-field debug-toggle">
+      <input
+        type="checkbox"
+        checked={showOverlays}
+        on:change={(event) => (showOverlays = event.target.checked)}
+      />
+      <span>Overlays</span>
+    </label>
     {#if pageMode === "subset"}
       <label class="debug-field debug-pages">
         <span>Pages</span>
@@ -83,6 +102,6 @@
     {/if}
   </div>
   <div class="viewer-shell">
-    <PdfViewer {src} {pageNumber} {pageMode} {pages} {renderText} />
+    <PdfViewer {src} {pageNumber} {pageMode} {pages} {renderText} {overlays} />
   </div>
 </div>

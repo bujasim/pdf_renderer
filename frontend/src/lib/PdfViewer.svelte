@@ -10,6 +10,7 @@
   export let pageMode = "all"; // "all" | "subset"
   export let pages = [];
   export let renderText = false;
+  export let overlays = [];
 
   let scrollEl;
 
@@ -25,12 +26,15 @@
   let lastPageNumber = null;
   let lastPageMode = "all";
   let lastPagesKey = "";
+  let lastOverlaysRef = overlays;
   let loadToken = 0;
   let observer = null;
   const elementToState = new WeakMap();
   let pageStateByNumber = new Map();
   let basePageWidth = 0;
   let basePageHeight = 0;
+  let overlaysByPage = new Map();
+  let overlaysVersion = 0;
 
   const PAGE_GAP = 18;
   const PAGE_PAD = 24;
@@ -69,6 +73,9 @@
       canvasEl: null,
       textEl: null,
       textLayer: null,
+      overlayEl: null,
+      overlayVersion: -1,
+      overlayRenderedScale: 0,
       page: null,
       baseWidth: defaultWidth,
       baseHeight: defaultHeight,
@@ -83,7 +90,11 @@
     if (!pdfDoc || !state.canvasEl) return;
     const needsCanvas = state.renderedScale !== renderScale;
     const needsText = renderText && state.textRenderedScale !== renderScale;
-    if ((!needsCanvas && !needsText) || state.rendering) return;
+    const needsOverlay =
+      state.overlayEl &&
+      (state.overlayVersion !== overlaysVersion ||
+        state.overlayRenderedScale !== renderScale);
+    if ((!needsCanvas && !needsText && !needsOverlay) || state.rendering) return;
     state.rendering = true;
     try {
       if (!state.page) state.page = await pdfDoc.getPage(state.number);
@@ -100,6 +111,9 @@
       } else if (!renderText && state.textEl) {
         state.textEl.textContent = "";
         state.textRenderedScale = 0;
+      }
+      if (needsOverlay) {
+        renderOverlaysForState(state);
       }
     } finally {
       state.rendering = false;
@@ -137,6 +151,68 @@
     }
   }
 
+  function rebuildOverlaysIndex() {
+    overlaysByPage = new Map();
+    if (!Array.isArray(overlays)) return;
+    for (const overlay of overlays) {
+      if (!overlay) continue;
+      const page = Number(overlay.page);
+      if (!Number.isInteger(page)) continue;
+      if (!overlaysByPage.has(page)) overlaysByPage.set(page, []);
+      overlaysByPage.get(page).push(overlay);
+    }
+  }
+
+  function renderOverlaysForState(state) {
+    if (!state.overlayEl || !state.page) return;
+    const list = overlaysByPage.get(state.number) || [];
+    if (
+      state.overlayVersion === overlaysVersion &&
+      state.overlayRenderedScale === renderScale
+    ) {
+      return;
+    }
+    state.overlayEl.textContent = "";
+    if (!list.length) {
+      state.overlayRenderedScale = renderScale;
+      state.overlayVersion = overlaysVersion;
+      return;
+    }
+    const viewport = state.page.getViewport({ scale: renderScale });
+    for (const item of list) {
+      const x = Number(item.x) || 0;
+      const y = Number(item.y) || 0;
+      const width = Number(item.width) || 0;
+      const height = Number(item.height) || 0;
+      const rect = viewport.convertToViewportRectangle([
+        x,
+        y,
+        x + width,
+        y + height,
+      ]);
+      const left = Math.min(rect[0], rect[2]);
+      const top = Math.min(rect[1], rect[3]);
+      const boxWidth = Math.abs(rect[0] - rect[2]);
+      const boxHeight = Math.abs(rect[1] - rect[3]);
+      const borderColor = item.color || "rgba(255, 0, 0, 0.8)";
+      const borderStyle = item.borderStyle || item.border || "solid";
+      const borderWidth = Number(item.borderWidth ?? 2);
+      const fill = item.fill || "transparent";
+
+      const box = document.createElement("div");
+      box.className = "overlay-box";
+      box.style.left = `${left}px`;
+      box.style.top = `${top}px`;
+      box.style.width = `${boxWidth}px`;
+      box.style.height = `${boxHeight}px`;
+      box.style.border = `${borderWidth}px ${borderStyle} ${borderColor}`;
+      box.style.background = fill;
+      state.overlayEl.appendChild(box);
+    }
+    state.overlayRenderedScale = renderScale;
+    state.overlayVersion = overlaysVersion;
+  }
+
   function normalizePages(input, maxPages) {
     if (!Array.isArray(input)) return [];
     const unique = new Set();
@@ -165,6 +241,8 @@
     for (const state of pageStates) {
       updatePageBase(state, state.baseWidth * ratio, state.baseHeight * ratio);
       state.renderedScale = 0;
+      state.textRenderedScale = 0;
+      state.overlayRenderedScale = 0;
     }
     pageGap *= ratio;
     pagePad *= ratio;
@@ -242,6 +320,8 @@
     pageStateByNumber = new Map();
     basePageWidth = 0;
     basePageHeight = 0;
+    overlaysByPage = new Map();
+    overlaysVersion = 0;
     clearSettle();
     emptyStateVisible = true;
   }
@@ -295,6 +375,8 @@
     pageStates = createPageStates(getPageList(doc), basePageWidth, basePageHeight);
     await tick();
     rebuildPageIndex();
+    rebuildOverlaysIndex();
+    overlaysVersion += 1;
     setupObserver();
     emptyStateVisible = pageStates.length === 0;
     if (!pageStates.length) {
@@ -344,6 +426,13 @@
       rebuildPageStates();
     }
   }
+
+  $: if (overlays !== lastOverlaysRef) {
+    lastOverlaysRef = overlays;
+    rebuildOverlaysIndex();
+    overlaysVersion += 1;
+    tick().then(renderVisiblePages);
+  }
 </script>
 
 <FrameLayout
@@ -368,6 +457,7 @@
             {#if renderText}
               <div class="textLayer text-layer" bind:this={state.textEl}></div>
             {/if}
+            <div class="overlay-layer" bind:this={state.overlayEl}></div>
           </div>
         </div>
       {/each}
@@ -407,6 +497,18 @@
     position: absolute;
     inset: 0;
     z-index: 1;
+  }
+
+  .overlay-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .overlay-box {
+    position: absolute;
+    box-sizing: border-box;
   }
 
   :global(.textLayer) {
