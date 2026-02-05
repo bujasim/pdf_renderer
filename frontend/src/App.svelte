@@ -8,6 +8,7 @@
   let pageMode = "all";
   let pagesInput = "1-3, 5";
   let pages = [];
+  let renderText = false;
 
   function handleOpen(event) {
     src = event.detail.url;
@@ -66,6 +67,14 @@
       />
       <span>Subset mode</span>
     </label>
+    <label class="debug-field debug-toggle">
+      <input
+        type="checkbox"
+        checked={renderText}
+        on:change={(event) => (renderText = event.target.checked)}
+      />
+      <span>Text layer</span>
+    </label>
     {#if pageMode === "subset"}
       <label class="debug-field debug-pages">
         <span>Pages</span>
@@ -74,6 +83,6 @@
     {/if}
   </div>
   <div class="viewer-shell">
-    <PdfViewer {src} {pageNumber} {pageMode} {pages} />
+    <PdfViewer {src} {pageNumber} {pageMode} {pages} {renderText} />
   </div>
 </div>

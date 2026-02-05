@@ -15,3 +15,19 @@ export async function renderPage(page, scale, canvas) {
   canvas.height = Math.floor(viewport.height);
   await page.render({ canvasContext: context, viewport }).promise;
 }
+
+export async function renderTextLayer(page, scale, container) {
+  if (!container) return null;
+  container.textContent = "";
+  const viewport = page.getViewport({ scale });
+  const textContentSource = page.streamTextContent
+    ? page.streamTextContent()
+    : await page.getTextContent();
+  const textLayer = new pdfjsLib.TextLayer({
+    textContentSource,
+    container,
+    viewport,
+  });
+  await textLayer.render();
+  return textLayer;
+}

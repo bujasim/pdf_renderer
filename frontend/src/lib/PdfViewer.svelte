@@ -1,6 +1,6 @@
 <script>
   import { tick } from "svelte";
-  import { loadPdf, renderPage } from "./pdfjs";
+  import { loadPdf, renderPage, renderTextLayer } from "./pdfjs";
   import FrameLayout from "./FrameLayout.svelte";
   import ScrollViewport from "./ScrollViewport.svelte";
   import PageStack from "./PageStack.svelte";
@@ -9,6 +9,7 @@
   export let pageNumber = 1;
   export let pageMode = "all"; // "all" | "subset"
   export let pages = [];
+  export let renderText = false;
 
   let scrollEl;
 
@@ -64,11 +65,15 @@
     return count.map((pageNum) => ({
       number: pageNum,
       el: null,
+      contentEl: null,
       canvasEl: null,
+      textEl: null,
+      textLayer: null,
       page: null,
       baseWidth: defaultWidth,
       baseHeight: defaultHeight,
       renderedScale: 0,
+      textRenderedScale: 0,
       visible: false,
       rendering: false,
     }));
@@ -76,14 +81,26 @@
 
   async function renderPageForState(state) {
     if (!pdfDoc || !state.canvasEl) return;
-    if (state.renderedScale === renderScale || state.rendering) return;
+    const needsCanvas = state.renderedScale !== renderScale;
+    const needsText = renderText && state.textRenderedScale !== renderScale;
+    if ((!needsCanvas && !needsText) || state.rendering) return;
     state.rendering = true;
     try {
       if (!state.page) state.page = await pdfDoc.getPage(state.number);
       const viewport = state.page.getViewport({ scale: renderScale });
       updatePageBase(state, viewport.width, viewport.height);
-      await renderPage(state.page, renderScale, state.canvasEl);
-      state.renderedScale = renderScale;
+      if (needsCanvas) {
+        await renderPage(state.page, renderScale, state.canvasEl);
+        state.renderedScale = renderScale;
+      }
+      if (renderText && state.textEl) {
+        if (state.textLayer?.cancel) state.textLayer.cancel();
+        state.textLayer = await renderTextLayer(state.page, renderScale, state.textEl);
+        state.textRenderedScale = renderScale;
+      } else if (!renderText && state.textEl) {
+        state.textEl.textContent = "";
+        state.textRenderedScale = 0;
+      }
     } finally {
       state.rendering = false;
     }
@@ -304,6 +321,21 @@
     if (state) renderPageForState(state);
   }
 
+  let lastRenderText = renderText;
+  $: if (renderText !== lastRenderText) {
+    lastRenderText = renderText;
+    if (renderText) {
+      tick().then(renderVisiblePages);
+    } else {
+      for (const state of pageStates) {
+        if (state.textLayer?.cancel) state.textLayer.cancel();
+        if (state.textEl) state.textEl.textContent = "";
+        state.textLayer = null;
+        state.textRenderedScale = 0;
+      }
+    }
+  }
+
   $: {
     const pagesKey = Array.isArray(pages) ? pages.join(",") : "";
     if (pageMode !== lastPageMode || pagesKey !== lastPagesKey) {
@@ -327,7 +359,16 @@
           bind:this={state.el}
           style={`--page-base-w: ${state.baseWidth}px; --page-base-h: ${state.baseHeight}px;`}
         >
-          <canvas class="pdf-canvas" bind:this={state.canvasEl}></canvas>
+          <div
+            class="page-content"
+            bind:this={state.contentEl}
+            style={`transform: ${viewScale === 1 ? "none" : `scale(${viewScale})`};`}
+          >
+            <canvas class="pdf-canvas" bind:this={state.canvasEl}></canvas>
+            {#if renderText}
+              <div class="textLayer text-layer" bind:this={state.textEl}></div>
+            {/if}
+          </div>
         </div>
       {/each}
     </PageStack>
@@ -344,11 +385,123 @@
     flex: 0 0 auto;
   }
 
+  .page-content {
+    width: var(--page-base-w);
+    height: var(--page-base-h);
+    transform-origin: top left;
+    position: relative;
+  }
+
   .pdf-canvas {
     width: 100%;
     height: 100%;
     display: block;
     background: white;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    position: relative;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .text-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+
+  :global(.textLayer) {
+    position: absolute;
+    text-align: initial;
+    inset: 0;
+    overflow: clip;
+    opacity: 1;
+    line-height: 1;
+    -webkit-text-size-adjust: none;
+    -moz-text-size-adjust: none;
+    text-size-adjust: none;
+    forced-color-adjust: none;
+    transform-origin: 0 0;
+    caret-color: CanvasText;
+    z-index: 0;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    user-select: text;
+  }
+
+  :global(.textLayer.highlighting) {
+    touch-action: none;
+  }
+
+  :global(.textLayer :is(span, br)) {
+    color: transparent;
+    position: absolute;
+    white-space: pre;
+    cursor: text;
+    transform-origin: 0% 0%;
+  }
+
+  :global(.textLayer > :not(.markedContent)),
+  :global(.textLayer .markedContent span:not(.markedContent)) {
+    z-index: 1;
+  }
+
+  :global(.textLayer span.markedContent) {
+    top: 0;
+    height: 0;
+  }
+
+  :global(.textLayer span[role="img"]) {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    cursor: default;
+  }
+
+  :global(.textLayer .highlight) {
+    --highlight-bg-color: rgb(180 0 170 / 0.25);
+    --highlight-selected-bg-color: rgb(0 100 0 / 0.25);
+    --highlight-backdrop-filter: none;
+    --highlight-selected-backdrop-filter: none;
+    margin: -1px;
+    padding: 1px;
+    background-color: var(--highlight-bg-color);
+    -webkit-backdrop-filter: var(--highlight-backdrop-filter);
+    backdrop-filter: var(--highlight-backdrop-filter);
+    border-radius: 4px;
+  }
+
+  :global(.textLayer ::-moz-selection) {
+    background: rgba(0, 0, 255, 0.25);
+    background: rgba(0 0 255 / 0.25);
+    background: color-mix(in srgb, AccentColor, transparent 75%);
+  }
+
+  :global(.textLayer ::selection) {
+    background: rgba(0, 0, 255, 0.25);
+    background: rgba(0 0 255 / 0.25);
+    background: color-mix(in srgb, AccentColor, transparent 75%);
+  }
+
+  :global(.textLayer br::-moz-selection) {
+    background: transparent;
+  }
+
+  :global(.textLayer br::selection) {
+    background: transparent;
+  }
+
+  :global(.textLayer .endOfContent) {
+    display: block;
+    position: absolute;
+    inset: 100% 0 0;
+    z-index: 0;
+    cursor: default;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+  }
+
+  :global(.textLayer.selecting .endOfContent) {
+    top: 0;
   }
 </style>

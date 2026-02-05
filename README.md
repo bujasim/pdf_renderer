@@ -30,7 +30,7 @@ This repo is in an **iterative build** process. The current behavior is:
 - Cursor-anchored zoom accounts for centered pages; if the cursor is outside the viewport, zoom falls back to center.
 
 ## Component API (minimal)
-- Props: `src` (URL), `pageNumber` (1-based), `pageMode` (`"all"` | `"subset"`), `pages` (array of page numbers)
+- Props: `src` (URL), `pageNumber` (1-based), `pageMode` (`"all"` | `"subset"`), `pages` (array of page numbers), `renderText` (boolean)
 
 ## Optional Extensions (not implemented)
 - Text layer for selection/CTRL+C.
